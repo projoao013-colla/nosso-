@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Nosso cantinho, nossa história.">
+  <title>Nosso site ❤️</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div id="entryScreen" class="entry-screen" aria-label="Entrada do nosso site">
+    <div class="entry-glow entry-glow-one"></div>
+    <div class="entry-glow entry-glow-two"></div>
+    <div class="entry-content">
+      <p class="eyebrow">NOSSO CANTINHO</p>
+      <div class="entry-heart">♥</div>
+      <h1><span id="entryName1">Meu Nome</span> <span class="heart">♥</span> <span id="entryName2">Nome Dela</span></h1>
+      <p id="entryTagline" class="entry-subtitle">Nossa história, nosso lugar.</p>
+      <div class="entry-photo-wrap">
+        <img id="entryPhoto" alt="Nossa foto">
+      </div>
+      <button id="enterSiteBtn" class="entry-btn" type="button">Entrar no nosso mundo <span>♥</span></button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <header class="topbar">
+    <a href="#inicio" class="brand">Nosso <span>♥</span></a>
+    <nav aria-label="Navegação principal">
+      <a href="#historia">História</a>
+      <a href="#memorias">Memórias</a>
+      <a href="#galeria">Galeria</a>
+      <a href="#datas">Datas</a>
+      <a href="#cartas">Cartas</a>
+      <a href="#coisas">Nossas coisas</a>
+      <a href="#sonhos">Sonhos</a>
+    </nav>
+    <div class="top-actions">
+      <button id="themeBtn" class="icon-btn" type="button" aria-label="Alternar tema">🌙</button>
+      <button id="editBtn" class="edit-btn" type="button">✏️ Editar</button>
+    </div>
+  </header>
+
+  <div id="editBar" class="edit-bar" hidden>
+    <strong>✏️ Editando nosso site</strong>
+    <div class="edit-buttons">
+      <button id="mainEditBtn" class="secondary" type="button">⚙️ Dados principais</button>
+      <button id="saveBtn" class="primary" type="button">💾 Salvar</button>
+      <button id="cancelBtn" class="secondary" type="button">↩️ Cancelar</button>
+    </div>
+  </div>
+
+  <main>
+    <section id="inicio" class="hero section">
+      <div class="hero-copy">
+        <p class="eyebrow">NOSSO CANTINHO</p>
+        <h1><span data-bind="name1">Meu Nome</span> <span class="heart">♥</span> <span data-bind="name2">Nome Dela</span></h1>
+        <p class="hero-subtitle" data-bind="tagline">Nosso cantinho, nossa história.</p>
+        <button class="cta" type="button" onclick="document.querySelector('#historia').scrollIntoView({behavior:'smooth'})">
+          Entrar no nosso mundo <span>♥</span>
+        </button>
+      </div>
+      <div class="hero-photo">
+        <img id="mainPhoto" alt="Foto principal do casal">
+        <div class="photo-glow"></div>
+      </div>
+    </section>
+
+    <section class="counter-section section">
+      <div class="section-heading centered">
+        <p class="eyebrow">DESDE O PRIMEIRO DIA</p>
+        <h2>Estamos juntos há...</h2>
+      </div>
+      <div class="counter-grid">
+        <div class="counter-card"><strong id="years">0</strong><span>anos</span></div>
+        <div class="counter-card"><strong id="months">0</strong><span>meses</span></div>
+        <div class="counter-card"><strong id="days">0</strong><span>dias</span></div>
+        <div class="counter-card"><strong id="hours">0</strong><span>horas</span></div>
+        <div class="counter-card"><strong id="minutes">0</strong><span>minutos</span></div>
+        <div class="counter-card"><strong id="seconds">0</strong><span>segundos</span></div>
+      </div>
+      <p id="daysTogether" class="days-together">0 dias juntos ♥</p>
+    </section>
+
+    <section id="historia" class="section">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 01</p>
+        <h2>Nossa história</h2>
+        <p>Cada momento é uma parte da história que estamos escrevendo juntos.</p>
+      </div>
+      <div id="timeline" class="timeline"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openMomentForm()">＋ Adicionar momento</button></div>
+    </section>
+
+    <section id="memorias" class="section soft">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 02</p>
+        <h2>Memórias ♥</h2>
+        <p>Pequenos momentos que merecem ficar guardados.</p>
+      </div>
+      <div id="memoriesGrid" class="cards-grid"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openMemoryForm()">＋ Adicionar memória</button></div>
+    </section>
+
+    <section id="galeria" class="section">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 03</p>
+        <h2>Nossa galeria</h2>
+        <p>Fotos, lugares e momentos que queremos lembrar.</p>
+      </div>
+      <div id="galleryGrid" class="gallery-grid"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openPhotoForm()">＋ Adicionar foto</button></div>
+    </section>
+
+    <section id="datas" class="section soft">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 04</p>
+        <h2>Datas que importam ♥</h2>
+      </div>
+      <div id="datesGrid" class="dates-grid"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openDateForm()">＋ Adicionar data</button></div>
+    </section>
+
+    <section id="cartas" class="section">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 05</p>
+        <h2>Para você 💌</h2>
+        <p>Algumas coisas merecem ser abertas devagar.</p>
+      </div>
+      <div id="lettersGrid" class="letters-grid"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openLetterForm()">＋ Adicionar carta</button></div>
+    </section>
+
+    <section id="coisas" class="section soft">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 06</p>
+        <h2>Nossas coisas</h2>
+        <p>As pequenas coisas que só fazem sentido para nós.</p>
+      </div>
+      <div id="thingsGrid" class="things-grid"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openThingsForm()">✏️ Editar nossas coisas</button></div>
+    </section>
+
+    <section id="sonhos" class="section">
+      <div class="section-heading">
+        <p class="eyebrow">CAPÍTULO 07</p>
+        <h2>Coisas que ainda queremos viver ✨</h2>
+      </div>
+      <div id="dreamsList" class="dreams-list"></div>
+      <div class="edit-only add-area"><button class="secondary" onclick="openDreamForm()">＋ Adicionar sonho</button></div>
+    </section>
+
+    <section id="musica" class="section music-section">
+      <div class="music-card">
+        <div class="music-icon">♫</div>
+        <div>
+          <p class="eyebrow">NOSSA MÚSICA</p>
+          <h2 data-bind="songTitle">Uma música especial</h2>
+          <p data-bind="songDescription">Adicione aqui uma música que vocês tenham direito de usar ou uma incorporação permitida.</p>
+        </div>
+        <button id="musicBtn" class="secondary" type="button">▶️ Play</button>
+      </div>
+    </section>
+
+    <section id="backup" class="section soft">
+      <div class="settings-card">
+        <div>
+          <p class="eyebrow">CONFIGURAÇÕES</p>
+          <h2>Nosso backup</h2>
+          <p>Exporte seus dados para um arquivo JSON e importe depois, se precisar.</p>
+        </div>
+        <div class="backup-actions">
+          <button class="secondary" onclick="exportBackup()">📥 Exportar nosso site</button>
+          <label class="secondary file-label">📤 Importar backup
+            <input id="importInput" type="file" accept=".json,application/json">
+          </label>
+        </div>
+        <small>As fotos podem aumentar bastante o tamanho do backup. O projeto comprime imagens antes de armazená-las.</small>
+      </div>
+    </section>
+
+    <section class="privacy-note">
+      <strong>Privacidade e sincronização</strong>
+      <p>Os dados principais e as fotos são sincronizados pelo Supabase. Assim, depois que o site estiver publicado, as alterações salvas ficam disponíveis nos outros dispositivos que acessarem este mesmo site.</p>
+    </section>
+  </main>
+
+  <footer>
+    <p>Feito para guardar nossa história <span>♥</span></p>
+  </footer>
+
+  <dialog id="formDialog">
+    <form id="dynamicForm" method="dialog"></form>
+  </dialog>
+
+  <dialog id="imageDialog">
+    <button class="close-dialog" onclick="imageDialog.close()" aria-label="Fechar">×</button>
+    <img id="modalImage" alt="">
+    <p id="modalCaption"></p>
+  </dialog>
+
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
