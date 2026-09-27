@@ -2,10 +2,10 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="description" content="Nosso cantinho, nossa história.">
   <title>Nosso site ❤️</title>
-<link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="css/style.css">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -28,7 +28,7 @@
 
   <header class="topbar">
     <a href="#inicio" class="brand">Nosso <span>♥</span></a>
-    <nav aria-label="Navegação principal">
+    <nav id="mainNav" aria-label="Navegação principal">
       <a href="#historia">História</a>
       <a href="#memorias">Memórias</a>
       <a href="#galeria">Galeria</a>
@@ -37,6 +37,7 @@
       <a href="#coisas">Nossas coisas</a>
       <a href="#sonhos">Sonhos</a>
     </nav>
+    <button id="navToggle" class="icon-btn nav-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="mainNav">☰</button>
     <div class="top-actions">
       <button id="themeBtn" class="icon-btn" type="button" aria-label="Alternar tema">🌙</button>
       <button id="editBtn" class="edit-btn" type="button">✏️ Editar</button>
@@ -201,7 +202,7 @@
     <p id="modalCaption"></p>
   </dialog>
 
-<script src="./storage.js"></script>
-<script src="./app.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
