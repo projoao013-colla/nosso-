@@ -1558,3 +1558,70 @@ if(document.readyState === "loading"){
   bootstrap();
 
 }
+
+// =====================================================
+// MENU MOBILE (hamburger)
+// =====================================================
+(function initMobileNav(){
+
+  const navToggle = document.getElementById("navToggle");
+  const nav = document.getElementById("mainNav");
+
+  if(!navToggle || !nav) return;
+
+  function closeNav(){
+    nav.classList.remove("nav-open");
+    navToggle.setAttribute("aria-expanded", "false");
+    navToggle.textContent = "☰";
+  }
+
+  function toggleNav(){
+    const isOpen = nav.classList.toggle("nav-open");
+    navToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    navToggle.textContent = isOpen ? "✕" : "☰";
+  }
+
+  navToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleNav();
+  });
+
+  nav.addEventListener("click", (event) => {
+    if(event.target.tagName === "A") closeNav();
+  });
+
+  document.addEventListener("click", (event) => {
+    if(nav.classList.contains("nav-open") && !nav.contains(event.target) && event.target !== navToggle){
+      closeNav();
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    if(window.innerWidth > 900) closeNav();
+  });
+
+})();
+
+// =====================================================
+// ANIMAÇÃO AO ROLAR A TELA (scroll reveal)
+// =====================================================
+(function initScrollReveal(){
+
+  if(!("IntersectionObserver" in window)) return;
+
+  document.documentElement.classList.add("reveal-ready");
+
+  const targets = document.querySelectorAll(".section:not(.hero)");
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if(entry.isIntersecting){
+        entry.target.classList.add("in-view");
+        observer.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+
+  targets.forEach((el) => observer.observe(el));
+
+})();
