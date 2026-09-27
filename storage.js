@@ -475,19 +475,44 @@ async function prepareImagesForCloud(obj) {
       JSON.stringify(obj)
     );
 
+  // Se o valor for uma URL assinada que NÓS mesmos geramos
+  // (via signPrivatePath), extrai o caminho permanente de
+  // volta — para nunca gravar uma URL temporária no banco.
+  function recoverStoragePath(value) {
+
+    if (typeof value !== "string") {
+      return "";
+    }
+
+    const match = value.match(
+      new RegExp(
+        `/storage/v1/object/(?:sign|public)/${PRIVATE_BUCKET}/([^?]+)`
+      )
+    );
+
+    return match
+      ? `storage:${PRIVATE_BUCKET}/${match[1]}`
+      : "";
+  }
+
   async function upload(value) {
 
-    if (
-      !value ||
-      isStoragePath(value)
-    ) {
+    if (!value) {
       return value;
     }
 
-    if (
-      typeof value !== "string"
-    ) {
+    if (isStoragePath(value)) {
       return value;
+    }
+
+    if (typeof value !== "string") {
+      return value;
+    }
+
+    const recovered = recoverStoragePath(value);
+
+    if (recovered) {
+      return recovered;
     }
 
     if (
