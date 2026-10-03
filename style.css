@@ -380,7 +380,7 @@ body.entry-locked{overflow:hidden}
 #formDialog{padding:0}
 #formDialog .edit-form{
   display:flex;flex-direction:column;gap:16px;
-  padding:28px;max-height:85vh;overflow-y:auto;
+  padding:28px;max-height:85vh;max-height:85dvh;overflow-y:auto;
   -webkit-overflow-scrolling:touch;
 }
 #formDialog .edit-form h2{margin:0 0 4px;font-size:clamp(1.35rem,4.5vw,1.7rem)}
@@ -410,6 +410,8 @@ body.entry-locked{overflow:hidden}
 .item-actions{display:flex;gap:7px;margin-top:12px;flex-wrap:wrap}
 .edit-only{display:none}
 .editing .edit-only{display:block}
+.editing .item-actions.edit-only{display:flex}
+.editing button.edit-only{display:inline-flex;align-items:center}
 .editing [contenteditable="true"]{outline:2px dashed color-mix(in srgb,var(--accent) 55%,transparent);outline-offset:5px;border-radius:6px;transition:outline-color .2s}
 .editing [contenteditable="true"]:focus{outline-color:var(--accent)}
 
@@ -422,6 +424,7 @@ body.entry-locked{overflow:hidden}
   display:flex;align-items:center;gap:14px;flex-wrap:wrap;
   box-shadow:var(--shadow);
 }
+.edit-bar[hidden]{display:none}
 .edit-bar span{color:var(--muted);font-size:.85rem;margin-right:auto}
 .edit-bar strong{margin-right:auto}
 .edit-buttons{display:flex;gap:8px;flex-wrap:wrap}
@@ -431,7 +434,8 @@ body.entry-locked{overflow:hidden}
    13. MODAIS
 ===================================================== */
 dialog{
-  width:min(620px,92%);max-height:88vh;
+  width:min(620px,92%);
+  max-height:88vh;max-height:88dvh;
   border:1px solid var(--line);border-radius:var(--radius-lg);
   background:var(--surface);color:var(--text);padding:0;
   box-shadow:var(--shadow);
@@ -483,6 +487,7 @@ dialog#imageDialog{padding:20px;max-width:min(900px,92%);max-height:90vh;overflo
 @media(prefers-reduced-motion:no-preference){
   html.reveal-ready .section:not(.hero){opacity:0;transform:translateY(14px);transition:opacity .6s var(--ease),transform .6s var(--ease)}
   html.reveal-ready .section.in-view{opacity:1;transform:none}
+  html.reveal-ready body.editing .section:not(.hero){opacity:1;transform:none}
 }
 @media(prefers-reduced-motion:reduce){
   html{scroll-behavior:auto}
@@ -514,6 +519,12 @@ dialog#imageDialog{padding:20px;max-width:min(900px,92%);max-height:90vh;overflo
   .edit-buttons{width:100%}
   .edit-buttons button{flex:1}
 
+  /* barra de edição compacta + espaço para ela não cobrir o conteúdo */
+  .edit-bar{padding:8px 10px;gap:8px}
+  .edit-bar strong{font-size:.85rem}
+  .edit-buttons button{padding:8px 6px;font-size:.8rem;min-height:40px}
+  body.editing{padding-bottom:calc(200px + env(safe-area-inset-bottom,0px))}
+
   .toast{bottom:calc(78px + env(safe-area-inset-bottom,0px))}
 
   .brand{font-size:1.05rem}
@@ -528,7 +539,7 @@ dialog#imageDialog{padding:20px;max-width:min(900px,92%);max-height:90vh;overflo
   .backup-actions label{width:100%}
 
   #formDialog .edit-form{padding:20px}
-  .form-actions{margin:8px -20px -20px;padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px))}
+  .form-actions{margin:8px -20px -20px;padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px));bottom:-20px}
 
   .entry-photo-wrap{width:min(190px,55vw)}
   .entry-content h1{font-size:clamp(2rem,10vw,3.2rem)}
