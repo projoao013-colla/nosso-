@@ -496,7 +496,21 @@ dialog#imageDialog{padding:20px;max-width:min(900px,92%);max-height:90vh;overflo
 }
 
 /* =====================================================
-   17. MOBILE (≤600px)
+   17. TABLET (≤900px)
+===================================================== */
+@media(max-width:900px){
+  .hero{grid-template-columns:1fr;min-height:auto}
+  .hero-photo{max-width:520px;width:100%;margin:auto}
+  .counter-grid{grid-template-columns:repeat(3,1fr)}
+  .counter-card:nth-child(3n+1){border-inline-start:0}
+  .counter-card:nth-child(n+4){border-top:1px solid var(--line)}
+  .cards-grid,.dates-grid,.letters-grid,.things-grid{grid-template-columns:1fr 1fr}
+  .gallery-grid{grid-template-columns:repeat(3,1fr)}
+  .music-card,.settings-card{align-items:flex-start}
+}
+
+/* =====================================================
+   18. MOBILE (≤600px) — deve vir DEPOIS do tablet
 ===================================================== */
 @media(max-width:600px){
   .section{padding:48px 0}
@@ -554,20 +568,6 @@ dialog#imageDialog{padding:20px;max-width:min(900px,92%);max-height:90vh;overflo
   .counter-card strong{font-size:1.15rem}
   .counter-card span{font-size:.62rem}
   .section{padding:40px 0}
-}
-
-/* =====================================================
-   18. TABLET (≤900px)
-===================================================== */
-@media(max-width:900px){
-  .hero{grid-template-columns:1fr;min-height:auto}
-  .hero-photo{max-width:520px;width:100%;margin:auto}
-  .counter-grid{grid-template-columns:repeat(3,1fr)}
-  .counter-card:nth-child(3n+1){border-inline-start:0}
-  .counter-card:nth-child(n+4){border-top:1px solid var(--line)}
-  .cards-grid,.dates-grid,.letters-grid,.things-grid{grid-template-columns:1fr 1fr}
-  .gallery-grid{grid-template-columns:repeat(3,1fr)}
-  .music-card,.settings-card{align-items:flex-start}
 }
 
 /* =====================================================
