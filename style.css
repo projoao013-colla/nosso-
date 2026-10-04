@@ -5,7 +5,15 @@
 ===================================================== */
 *,*::before,*::after{box-sizing:border-box}
 html{scroll-behavior:smooth}
-html,body{max-width:100%;overflow-x:hidden}
+html{
+    max-width:100%;
+    overflow-x:hidden;
+}
+
+body{
+    max-width:100%;
+    overflow-x:clip;
+}
 body{margin:0}
 img,svg{max-width:100%;display:block}
 button,input,textarea,select{font:inherit;color:inherit}
