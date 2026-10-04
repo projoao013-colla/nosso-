@@ -47,7 +47,7 @@ function initEntryScreen(){
   $("#entryName2").textContent=d.name2 || "Nome Dela";
   $("#entryTagline").textContent=d.tagline || "Nossa história, nosso lugar.";
 
-  photo.src=d.mainPhoto || placeholderDataURL("Nossa foto");
+  photo.src=imgSrc(d.mainPhoto) || placeholderDataURL("Nossa foto");
   photo.alt=`Foto de ${d.name1 || "vocês"} e ${d.name2 || "vocês"}`;
 
   document.body.classList.add("entry-locked");
@@ -70,7 +70,7 @@ function bindBasics(){
   const photo=$("#mainPhoto");
 
   if(photo){
-    photo.src=d.mainPhoto || placeholderDataURL("Nossa foto");
+    photo.src=imgSrc(d.mainPhoto) || placeholderDataURL("Nossa foto");
     photo.alt=`Foto de ${d.name1 || "vocês"} e ${d.name2 || "vocês"}`;
   }
 }
@@ -98,6 +98,27 @@ function placeholderDataURL(text){
   return "data:image/svg+xml;charset=UTF-8,"+encodeURIComponent(svg);
 }
 
+// Foto cuja URL não pôde ser gerada (ex.: arquivo apagado) continua no dado
+// como "storage:fotos/..."; na tela mostramos um aviso em vez de tentar
+// carregar esse valor como se fosse uma imagem.
+function imgSrc(value){
+  return isStoragePath(value)
+    ? placeholderDataURL("Foto indisponível")
+    : value;
+}
+
+function countUnavailablePhotos(d){
+  let n=isStoragePath(d.mainPhoto) ? 1 : 0;
+
+  ["timeline","memories","gallery"].forEach(k=>{
+    (d[k]||[]).forEach(item=>{
+      if(item && isStoragePath(item.image)) n++;
+    });
+  });
+
+  return n;
+}
+
 function renderTimeline(){
   const el=$("#timeline");
   const d=current();
@@ -120,7 +141,7 @@ function renderTimeline(){
       ${item.image ? `
         <img
           class="item-image"
-          src="${item.image}"
+          src="${imgSrc(item.image)}"
           alt="${esc(item.title)}"
         >
       ` : ""}
@@ -156,7 +177,7 @@ function renderMemories(){
 
       ${m.image ? `
         <img
-          src="${m.image}"
+          src="${imgSrc(m.image)}"
           alt="${esc(m.title)}"
         >
       ` : ""}
@@ -201,7 +222,7 @@ function renderGallery(){
     >
 
       <img
-        src="${g.image}"
+        src="${imgSrc(g.image)}"
         alt="${esc(g.caption || "Foto do casal")}"
         loading="lazy"
       >
@@ -1145,7 +1166,7 @@ function openImage(id){
   const image=$("#modalImage");
 
   if(image){
-    image.src=x.image;
+    image.src=imgSrc(x.image);
     image.alt=x.caption||"Foto do casal";
   }
 
@@ -1687,8 +1708,13 @@ async function startPrivateSite(){
 
     renderAll();
 
+    const unavailable=countUnavailablePhotos(data);
+
     showToast(
-      "Área privada carregada 🔒"
+      unavailable
+        ? `Área privada carregada 🔒 (${unavailable} foto(s) indisponível(is))`
+        : "Área privada carregada 🔒",
+      unavailable ? 4500 : 2200
     );
 
     // só chega aqui se o usuário está autenticado e o site carregou
