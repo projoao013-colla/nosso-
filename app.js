@@ -2,6 +2,9 @@ let data = loadData();
 let draft = null;
 let editing = false;
 let timer;
+let privateSiteReady=false;
+let importing=false;
+let loggingOut=false;
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -20,13 +23,13 @@ function uid(prefix="id"){
   return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
 }
 
-function showToast(msg){
+function showToast(msg,duration=2200){
   const el=$("#toast");
   if(!el) return;
   el.textContent=msg;
   el.classList.add("show");
   clearTimeout(showToast.t);
-  showToast.t=setTimeout(()=>el.classList.remove("show"),2200);
+  showToast.t=setTimeout(()=>el.classList.remove("show"),duration);
 }
 
 function current(){
@@ -548,6 +551,11 @@ function updateEditUI(){
 }
 
 function enterEdit(){
+  if(importing){
+    showToast("Aguarde a importação terminar.",3500);
+    return;
+  }
+
   draft=JSON.parse(JSON.stringify(data));
   editing=true;
 
@@ -1162,25 +1170,221 @@ function exportBackup(){
   showToast("Backup exportado 📥");
 }
 
+// =====================================================
+// IMPORTAÇÃO DE BACKUP
+// =====================================================
+const MAX_IMPORT_BYTES=5*1024*1024; // 5 MB
+
+const BACKUP_STRING_KEYS=[
+  "name1","name2","tagline","relationshipDate",
+  "mainPhoto","songTitle","songDescription"
+];
+
+// lista -> prefixo usado para gerar IDs que faltam
+const BACKUP_LISTS={
+  timeline:"t",
+  memories:"m",
+  gallery:"g",
+  dates:"d",
+  letters:"l",
+  dreams:"s"
+};
+
+const BACKUP_ITEM_STRING_FIELDS=[
+  "id","title","date","text","description","caption","image"
+];
+
+const SAFE_ID=/^[A-Za-z0-9_-]{1,64}$/;
+
+// imagem vazia, data:image, storage:fotos/..., ou http(s) — sem aspas/espaços/<>
+const SAFE_IMAGE=/^(?:|data:image\/[a-z0-9.+-]+[;,][^\s"'<>`]*|storage:fotos\/[^\s"'<>`]+|https?:\/\/[^\s"'<>`]+)$/i;
+
+function userError(message){
+  const e=new Error(message);
+  e.userFacing=true;
+  return e;
+}
+
+function isPlainObject(v){
+  return v!==null && typeof v==="object" && !Array.isArray(v);
+}
+
+function validateBackup(raw){
+  if(!isPlainObject(raw)){
+    throw userError("Formato de backup inválido.");
+  }
+
+  const known=Object.keys(defaultData);
+
+  if(!known.some(k=>k in raw)){
+    throw userError("Esse arquivo não parece ser um backup deste site.");
+  }
+
+  // só aceita campos conhecidos (ignora o resto)
+  const picked={};
+
+  known.forEach(k=>{
+    if(raw[k]!==undefined && raw[k]!==null){
+      picked[k]=raw[k];
+    }
+  });
+
+  for(const k of BACKUP_STRING_KEYS){
+    if(k in picked && typeof picked[k]!=="string"){
+      throw userError(`Backup inválido: o campo "${k}" deveria ser texto.`);
+    }
+  }
+
+  if(picked.mainPhoto && !SAFE_IMAGE.test(picked.mainPhoto)){
+    throw userError("Backup inválido: a foto principal tem um formato não aceito.");
+  }
+
+  for(const [key,prefix] of Object.entries(BACKUP_LISTS)){
+    if(!(key in picked)) continue;
+
+    if(!Array.isArray(picked[key])){
+      throw userError(`Backup inválido: "${key}" deveria ser uma lista.`);
+    }
+
+    const used=new Set();
+
+    picked[key]=picked[key].map((item,i)=>{
+      if(!isPlainObject(item)){
+        throw userError(`Backup inválido: item ${i+1} de "${key}" está incorreto.`);
+      }
+
+      const out={...item};
+
+      if(typeof out.id==="number") out.id=String(out.id);
+
+      for(const f of BACKUP_ITEM_STRING_FIELDS){
+        if(out[f]===undefined || out[f]===null){
+          delete out[f];
+          continue;
+        }
+
+        if(typeof out[f]!=="string"){
+          throw userError(`Backup inválido: "${f}" no item ${i+1} de "${key}" deveria ser texto.`);
+        }
+      }
+
+      if(out.image!==undefined && !SAFE_IMAGE.test(out.image)){
+        throw userError(`Backup inválido: imagem do item ${i+1} de "${key}" tem formato não aceito.`);
+      }
+
+      if(key==="gallery" && !out.image){
+        throw userError(`Backup inválido: foto ${i+1} da galeria está sem imagem.`);
+      }
+
+      if(key==="dates" && !/^\d{4}-\d{2}-\d{2}$/.test(out.date||"")){
+        throw userError(`Backup inválido: data ${i+1} precisa estar no formato AAAA-MM-DD.`);
+      }
+
+      if(key==="dreams" && "done" in out && typeof out.done!=="boolean"){
+        throw userError(`Backup inválido: sonho ${i+1} tem "done" incorreto.`);
+      }
+
+      // preenche ID faltando (ou inseguro/duplicado)
+      if(!(typeof out.id==="string" && SAFE_ID.test(out.id) && !used.has(out.id))){
+        let id;
+
+        do{
+          id=uid(prefix);
+        }while(used.has(id));
+
+        out.id=id;
+      }
+
+      used.add(out.id);
+
+      return out;
+    });
+  }
+
+  if("things" in picked){
+    if(!isPlainObject(picked.things)){
+      throw userError('Backup inválido: "things" deveria ser um objeto.');
+    }
+
+    for(const [k,v] of Object.entries(picked.things)){
+      if(!Array.isArray(v) || v.some(x=>typeof x!=="string")){
+        throw userError(`Backup inválido: a seção "${k}" deveria ser uma lista de textos.`);
+      }
+    }
+  }
+
+  return mergeData(cloneDefault(),picked);
+}
+
 $("#importInput")?.addEventListener(
   "change",
   async e=>{
-    const file=e.target.files[0];
+    const input=e.target;
+    const file=input.files[0];
 
     if(!file) return;
 
-    try{
-      const imported=JSON.parse(
-        await file.text()
-      );
+    const reset=()=>{ input.value=""; };
 
-      const merged=mergeData(
-        cloneDefault(),
-        imported
-      );
+    if(!privateSiteReady){
+      showToast("Entre no site antes de importar um backup.",4000);
+      reset();
+      return;
+    }
+
+    if(editing){
+      showToast("Salve ou cancele a edição antes de importar um backup.",4500);
+      reset();
+      return;
+    }
+
+    if(importing){
+      reset();
+      return;
+    }
+
+    if(file.size>MAX_IMPORT_BYTES){
+      showToast("Arquivo grande demais. O limite é 5 MB.",4500);
+      reset();
+      return;
+    }
+
+    importing=true;
+
+    try{
+      let imported;
+
+      try{
+        imported=JSON.parse(await file.text());
+      }catch{
+        throw userError("O arquivo não é um JSON válido.");
+      }
+
+      const clean=validateBackup(imported);
+
+      if(editing){
+        throw userError("Salve ou cancele a edição antes de importar um backup.");
+      }
+
+      const resumo=
+        `${clean.timeline.length} momentos, `+
+        `${clean.memories.length} memórias, `+
+        `${clean.gallery.length} fotos, `+
+        `${clean.dates.length} datas, `+
+        `${clean.letters.length} cartas e `+
+        `${clean.dreams.length} sonhos`;
+
+      if(!confirm(
+        "Importar este backup vai SUBSTITUIR todos os dados atuais do site.\n\n"+
+        `O backup tem: ${resumo}.\n\n`+
+        "Deseja continuar?"
+      )){
+        showToast("Importação cancelada.");
+        return;
+      }
 
       const prepared=
-        await prepareImagesForCloud(merged);
+        await prepareImagesForCloud(clean);
 
       await saveCloudData(prepared);
 
@@ -1198,12 +1402,18 @@ $("#importInput")?.addEventListener(
       console.error(err);
 
       showToast(
-        "Não foi possível importar esse backup."
+        err?.userFacing
+          ? err.message
+          : "Não foi possível importar esse backup.",
+        err?.userFacing ? 4500 : 2200
       );
 
-    }
+    }finally{
 
-    e.target.value="";
+      importing=false;
+      reset();
+
+    }
   }
 );
 
@@ -1481,6 +1691,10 @@ async function startPrivateSite(){
       "Área privada carregada 🔒"
     );
 
+    // só chega aqui se o usuário está autenticado e o site carregou
+    privateSiteReady=true;
+    startTimer();
+
   }catch(error){
 
     console.error(
@@ -1488,11 +1702,263 @@ async function startPrivateSite(){
       error
     );
 
+    privateSiteReady=false;
+    stopTimer();
+
     showLoginScreen(
       "Não foi possível carregar seus dados. Tente novamente."
     );
   }
 }
+
+// =====================================================
+// TIMER (só roda com o site carregado e usuário autenticado)
+// =====================================================
+function startTimer(){
+  if(timer) return;
+
+  timer=setInterval(updateCounter,1000);
+}
+
+function stopTimer(){
+  clearInterval(timer);
+  timer=undefined;
+}
+
+// =====================================================
+// RENOVAÇÃO AUTOMÁTICA DAS URLs TEMPORÁRIAS DAS FOTOS
+// =====================================================
+const PHOTO_REFRESH_COOLDOWN=30*1000;      // mesma foto: no máx. 1 renovação a cada 30s
+const PHOTO_IMG_RETRY_COOLDOWN=60*1000;    // mesma <img>: no máx. 1 tentativa por minuto
+const PHOTO_EXPIRY_MARGIN=5*60*1000;       // renova se faltar menos de 5 min
+
+const photoRefreshState=new Map();         // caminho -> { promise, url, at }
+
+const PHOTO_URL_RE=new RegExp(
+  `/storage/v1/object/(?:sign|public)/${PRIVATE_BUCKET}/([^?#]+)`
+);
+
+function photoPathFromUrl(url){
+  if(typeof url!=="string") return "";
+
+  const m=url.match(PHOTO_URL_RE);
+
+  if(!m) return "";
+
+  try{
+    return decodeURIComponent(m[1]);
+  }catch{
+    return m[1];
+  }
+}
+
+// lê a data de expiração (claim "exp") do token da URL assinada
+function photoUrlExpiry(url){
+  try{
+    const token=new URL(url).searchParams.get("token");
+
+    if(!token) return 0;
+
+    const payload=token.split(".")[1];
+
+    const json=JSON.parse(
+      atob(payload.replace(/-/g,"+").replace(/_/g,"/"))
+    );
+
+    return json.exp ? json.exp*1000 : 0;
+  }catch{
+    return 0;
+  }
+}
+
+function refreshPhotoUrl(path){
+  const state=photoRefreshState.get(path);
+
+  if(state){
+    if(state.promise) return state.promise;
+
+    if(Date.now()-state.at<PHOTO_REFRESH_COOLDOWN){
+      return Promise.resolve(state.url);
+    }
+  }
+
+  const promise=(async()=>{
+    try{
+      const url=await signPrivatePath(path);
+
+      photoRefreshState.set(path,{promise:null,url,at:Date.now()});
+
+      return url;
+    }catch(error){
+      console.warn("Não foi possível renovar a foto:",path,error);
+
+      photoRefreshState.set(path,{promise:null,url:null,at:Date.now()});
+
+      return null;
+    }
+  })();
+
+  photoRefreshState.set(path,{
+    promise,
+    url:state?.url||null,
+    at:state?.at||0
+  });
+
+  return promise;
+}
+
+function applyPhotoUrl(path,newUrl){
+  const swap=item=>{
+    if(item && photoPathFromUrl(item.image)===path){
+      item.image=newUrl;
+    }
+  };
+
+  [data,draft].forEach(src=>{
+    if(!src) return;
+
+    if(photoPathFromUrl(src.mainPhoto)===path){
+      src.mainPhoto=newUrl;
+    }
+
+    ["timeline","memories","gallery"].forEach(k=>{
+      (src[k]||[]).forEach(swap);
+    });
+  });
+
+  $$("img").forEach(img=>{
+    const cur=img.getAttribute("src");
+
+    if(photoPathFromUrl(cur)===path && cur!==newUrl){
+      img.dataset.photoRetryAt=String(Date.now());
+      img.src=newUrl;
+    }
+  });
+}
+
+async function renewPhoto(path){
+  const url=await refreshPhotoUrl(path);
+
+  if(url) applyPhotoUrl(path,url);
+}
+
+// foto falhou ao carregar -> gera nova URL (error não "borbulha", então usa captura)
+document.addEventListener("error",event=>{
+  const img=event.target;
+
+  if(!(img instanceof HTMLImageElement)) return;
+
+  const path=photoPathFromUrl(img.getAttribute("src"));
+
+  if(!path) return;
+
+  const last=Number(img.dataset.photoRetryAt||0);
+
+  if(Date.now()-last<PHOTO_IMG_RETRY_COOLDOWN) return;
+
+  img.dataset.photoRetryAt=String(Date.now());
+
+  renewPhoto(path);
+},true);
+
+// voltou para a aba -> renova as fotos expiradas ou prestes a expirar
+async function refreshExpiringPhotos(){
+  if(!privateSiteReady) return;
+
+  const now=Date.now();
+  const paths=new Set();
+
+  const check=url=>{
+    const p=photoPathFromUrl(url);
+
+    if(!p) return;
+
+    const exp=photoUrlExpiry(url);
+
+    if(exp && exp-now<PHOTO_EXPIRY_MARGIN){
+      paths.add(p);
+    }
+  };
+
+  [data,draft].forEach(src=>{
+    if(!src) return;
+
+    check(src.mainPhoto);
+
+    ["timeline","memories","gallery"].forEach(k=>{
+      (src[k]||[]).forEach(item=>check(item?.image));
+    });
+  });
+
+  $$("img").forEach(img=>check(img.getAttribute("src")));
+
+  await Promise.all([...paths].map(renewPhoto));
+}
+
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible"){
+    refreshExpiringPhotos();
+  }
+});
+
+// =====================================================
+// LOGOUT
+// =====================================================
+const SUPABASE_PROJECT_REF=(()=>{
+  try{
+    return new URL(SUPABASE_URL).hostname.split(".")[0];
+  }catch{
+    return "";
+  }
+})();
+
+function clearPrivateLocalData(){
+  try{
+    localStorage.removeItem(STORAGE_KEY);
+
+    // sessão do Supabase deste projeto (não mexe em outros apps do mesmo domínio)
+    if(SUPABASE_PROJECT_REF){
+      const prefix=`sb-${SUPABASE_PROJECT_REF}-auth-token`;
+
+      Object.keys(localStorage)
+        .filter(k=>k.startsWith(prefix))
+        .forEach(k=>localStorage.removeItem(k));
+    }
+  }catch(error){
+    console.error("Erro ao limpar dados locais:",error);
+  }
+}
+
+async function logout(){
+  if(loggingOut) return;
+
+  loggingOut=true;
+  stopTimer();
+  privateSiteReady=false;
+
+  try{
+    const {error}=await supabaseClient.auth.signOut();
+
+    if(error) console.error("Erro no signOut:",error);
+  }catch(error){
+    console.error("Erro no signOut:",error);
+  }
+
+  clearPrivateLocalData();
+
+  location.reload();
+}
+
+// qualquer botão/link com id="logoutBtn" ou data-logout dispara o logout
+document.addEventListener("click",event=>{
+  const el=event.target.closest("#logoutBtn, [data-logout]");
+
+  if(!el) return;
+
+  event.preventDefault();
+
+  logout();
+});
 
 async function bootstrap(){
 
@@ -1539,12 +2005,6 @@ async function bootstrap(){
       "Não foi possível conectar ao site privado."
     );
   }
-
-  timer=
-    setInterval(
-      updateCounter,
-      1000
-    );
 }
 
 if(document.readyState === "loading"){
