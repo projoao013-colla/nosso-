@@ -341,31 +341,47 @@ async function resolvePrivateImages(obj) {
       JSON.stringify(obj)
     );
 
+  // Uma foto ausente (apagada, sem permissão, erro de rede...) NÃO pode
+  // derrubar o carregamento do site. Nesse caso mantemos o caminho
+  // "storage:fotos/..." exatamente como está (a referência não é perdida
+  // nem alterada) e o app mostra "Foto indisponível" no lugar da imagem.
+  // Fotos válidas continuam recebendo Signed URL normalmente.
+  async function resolveValue(value) {
+
+    if (!isStoragePath(value)) {
+      return value;
+    }
+
+    const path = storagePath(value);
+
+    try {
+      return await signPrivatePath(path);
+    } catch (error) {
+
+      console.warn(
+        "Foto indisponível (referência mantida):",
+        path,
+        error?.message || error
+      );
+
+      return value;
+    }
+  }
+
   async function resolveItem(item) {
 
-    if (
-      item &&
-      isStoragePath(item.image)
-    ) {
+    if (item) {
       item.image =
-        await signPrivatePath(
-          storagePath(item.image)
+        await resolveValue(
+          item.image
         );
     }
   }
 
-  if (
-    isStoragePath(
+  result.mainPhoto =
+    await resolveValue(
       result.mainPhoto
-    )
-  ) {
-    result.mainPhoto =
-      await signPrivatePath(
-        storagePath(
-          result.mainPhoto
-        )
-      );
-  }
+    );
 
   for (
     const item of result.timeline || []
@@ -478,21 +494,48 @@ async function prepareImagesForCloud(obj) {
   // Se o valor for uma URL assinada que NÓS mesmos geramos
   // (via signPrivatePath), extrai o caminho permanente de
   // volta — para nunca gravar uma URL temporária no banco.
+  //
+  // Só converte URLs do NOSSO projeto Supabase: uma URL de outro
+  // projeto/site viraria um caminho que não existe neste bucket.
+  // O caminho também é decodificado (%20 etc.), pois o Storage
+  // espera o nome real do arquivo.
   function recoverStoragePath(value) {
 
     if (typeof value !== "string") {
       return "";
     }
 
-    const match = value.match(
+    let url;
+
+    try {
+      url = new URL(value);
+    } catch {
+      return "";
+    }
+
+    if (url.origin !== new URL(SUPABASE_URL).origin) {
+      return "";
+    }
+
+    const match = url.pathname.match(
       new RegExp(
-        `/storage/v1/object/(?:sign|public)/${PRIVATE_BUCKET}/([^?]+)`
+        `^/storage/v1/object/(?:sign|public)/${PRIVATE_BUCKET}/(.+)$`
       )
     );
 
-    return match
-      ? `storage:${PRIVATE_BUCKET}/${match[1]}`
-      : "";
+    if (!match) {
+      return "";
+    }
+
+    let path = match[1];
+
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+      // mantém como veio
+    }
+
+    return `storage:${PRIVATE_BUCKET}/${path}`;
   }
 
   async function upload(value) {
