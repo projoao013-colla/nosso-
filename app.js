@@ -468,6 +468,7 @@ function renderAll(){
   renderDreams();
   updateCounter();
   updateEditUI();
+  renderToqueIdentity();
 }
 
 function updateCounter(){
@@ -1721,6 +1722,9 @@ async function startPrivateSite(){
     privateSiteReady=true;
     startTimer();
 
+    // Toque (Realtime): isolado e sem await — uma falha aqui NUNCA derruba o site
+    initToque().catch(e=>console.warn("Toque:",e));
+
   }catch(error){
 
     console.error(
@@ -1984,6 +1988,833 @@ document.addEventListener("click",event=>{
   event.preventDefault();
 
   logout();
+});
+
+// =====================================================
+// TOQUE — carinhos e desenhos em tempo real (Supabase Realtime)
+// =====================================================
+// Eventos ficam na tabela public.toques (RLS: só os 2 usuários autorizados).
+// Desenhos vão como PNG para o bucket privado "fotos" (pasta toque/); o evento
+// guarda só o caminho e quem recebe gera a Signed URL.
+const TOQUE_COOLDOWN_MS=1500;
+const TOQUE_STAGE_MS=4200;
+const TOQUE_DRAW_PREFIX="storage:fotos/toque/";
+
+const TOQUE_TIPOS={
+  carinho:{emoji:"❤️",enviado:"Carinho enviado ❤️",msg:n=>`${n} mandou um carinho para você!`},
+  abraco:{emoji:"🫂",enviado:"Abraço enviado 🫂",msg:n=>`${n} mandou um abraço para você!`},
+  beijo:{emoji:"💋",enviado:"Beijo enviado 💋",msg:n=>`${n} mandou um beijo para você!`},
+  saudade:{emoji:"🥰",enviado:"Saudade enviada 🥰",msg:n=>`${n} está com saudade de você!`},
+  desenho:{emoji:"✏️",enviado:"Desenho enviado ❤️",msg:n=>`${n} desenhou algo para você!`}
+};
+
+const toque={
+  me:"",other:"",channel:null,started:false,
+  seen:new Set(),queue:[],running:false,
+  lastSentAt:0,subscribedOnce:false,stageTimer:null,lastRow:null
+};
+
+const toqueDraw={
+  ctx:null,w:0,h:0,pid:null,last:null,mid:null,
+  ink:false,color:"#241a1f",size:5,ro:null,sending:false
+};
+
+function toqueReducedMotion(){
+  return !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+
+// ---------- identidade (quem é você neste aparelho) ----------
+function toqueIdentityKey(){ return `nosso_toque_eu_${toque.me}`; }
+
+function toqueIdentity(){
+  try{
+    const v=localStorage.getItem(toqueIdentityKey());
+    return v==="1"||v==="2" ? v : "";
+  }catch{ return ""; }
+}
+
+function toqueNames(){
+  return {
+    "1":String(data?.name1||"").trim()||"Seu amor",
+    "2":String(data?.name2||"").trim()||"Seu amor"
+  };
+}
+
+function toqueSenderName(){
+  const id=toqueIdentity();
+  return (id ? toqueNames()[id] : "Seu amor").slice(0,40);
+}
+
+function toqueRowName(row){
+  return String(row?.remetente_nome||"").trim().slice(0,40)||"Seu amor";
+}
+
+function renderToqueIdentity(){
+  const box=$("#toqueWho");
+  if(!box) return;
+
+  const id=toque.me ? toqueIdentity() : "";
+
+  $$("#toqueGrid [data-toque]").forEach(b=>{ b.disabled=!id; });
+
+  if(!toque.me){
+    box.hidden=true;
+    return;
+  }
+
+  const names=toqueNames();
+  box.hidden=false;
+  box.replaceChildren();
+
+  const q=document.createElement("span");
+  q.className="toque-who-q";
+
+  if(!id){
+    q.textContent="Quem é você neste aparelho?";
+    box.append(q);
+
+    ["1","2"].forEach(k=>{
+      const b=document.createElement("button");
+      b.type="button";
+      b.className="secondary toque-who-btn";
+      b.dataset.toqueWho=k;
+      b.textContent=names[k];
+      box.append(b);
+    });
+  }else{
+    const strong=document.createElement("strong");
+    strong.textContent=names[id];
+    q.append("Você é ",strong);
+
+    const change=document.createElement("button");
+    change.type="button";
+    change.className="small-btn";
+    change.dataset.toqueWho="";
+    change.textContent="Trocar";
+
+    box.append(q,change);
+  }
+}
+
+function setToqueIdentity(value){
+  try{
+    if(value==="1"||value==="2") localStorage.setItem(toqueIdentityKey(),value);
+    else localStorage.removeItem(toqueIdentityKey());
+  }catch{}
+
+  renderToqueIdentity();
+}
+
+function setToqueStatus(state,text){
+  const st=$("#toqueStatus");
+  if(!st) return;
+
+  st.dataset.state=state;
+  $("#toqueStatusText").textContent=text;
+}
+
+// ---------- partículas ----------
+function toqueBurst(layer,emoji,n=10,rise="-60vh"){
+  if(!layer || toqueReducedMotion()) return;
+  if(layer.childElementCount>40) return;
+
+  for(let i=0;i<n;i++){
+    const s=document.createElement("span");
+    s.className="toque-p";
+    s.textContent=emoji;
+    s.setAttribute("aria-hidden","true");
+    s.style.setProperty("--x",(6+Math.random()*88).toFixed(0)+"%");
+    s.style.setProperty("--s",(1.1+Math.random()*1.6).toFixed(2)+"rem");
+    s.style.setProperty("--d",(Math.random()*0.8).toFixed(2)+"s");
+    s.style.setProperty("--t",(2+Math.random()*1.4).toFixed(2)+"s");
+    s.style.setProperty("--dx",(Math.random()*70-35).toFixed(0)+"px");
+    s.style.setProperty("--rise",rise);
+    s.addEventListener("animationend",()=>s.remove(),{once:true});
+    layer.append(s);
+  }
+}
+
+// ---------- enviar ----------
+function toqueErrorMessage(error){
+  const code=String(error?.code||"");
+  const msg=String(error?.message||"");
+
+  if(code==="42P01"||code==="PGRST205"||/does not exist|Could not find the table/i.test(msg)){
+    return "O Toque ainda não foi configurado no Supabase (falta rodar o SQL).";
+  }
+
+  if(code==="42501"||/row-level security|permission denied/i.test(msg)){
+    return "Sem permissão para enviar o toque.";
+  }
+
+  if(!navigator.onLine) return "Sem internet. Tente de novo.";
+
+  return "Não foi possível enviar agora. Tente de novo.";
+}
+
+async function sendToque(tipo,{btn=null,desenhoPath=null}={}){
+  if(!TOQUE_TIPOS[tipo]) return false;
+
+  if(!toque.me||!toque.other){
+    showToast("O Toque ainda não está pronto.");
+    return false;
+  }
+
+  if(!toqueIdentity()){
+    showToast("Escolha quem você é primeiro.");
+    return false;
+  }
+
+  const now=Date.now();
+
+  // anti-spam: um toque a cada 1,5 s
+  if(tipo!=="desenho" && now-toque.lastSentAt<TOQUE_COOLDOWN_MS) return false;
+
+  toque.lastSentAt=now;
+
+  const {error}=await supabaseClient.from("toques").insert({
+    remetente:toque.me,
+    destinatario:toque.other,
+    remetente_nome:toqueSenderName(),
+    tipo,
+    desenho_path:desenhoPath
+  });
+
+  if(error){
+    console.error("Toque: falha ao enviar",error);
+    toque.lastSentAt=0;
+    showToast(toqueErrorMessage(error),3800);
+    return false;
+  }
+
+  showToast(TOQUE_TIPOS[tipo].enviado,2000);
+
+  if(btn){
+    btn.classList.remove("sent");
+    void btn.offsetWidth;
+    btn.classList.add("sent");
+  }
+
+  toqueBurst($("#toqueFx"),TOQUE_TIPOS[tipo].emoji,7,"-180px");
+
+  return true;
+}
+
+// ---------- receber ----------
+function toqueValidDrawingPath(p){
+  return typeof p==="string" && p.startsWith(TOQUE_DRAW_PREFIX) && !p.includes("..");
+}
+
+function onToqueRow(row){
+  if(!row||!row.id||toque.seen.has(row.id)) return;
+  if(row.destinatario!==toque.me||row.remetente!==toque.other) return;
+  if(!TOQUE_TIPOS[row.tipo]) return;
+  if(row.tipo==="desenho" && !toqueValidDrawingPath(row.desenho_path)) return;
+
+  toque.seen.add(row.id);
+
+  if(toque.queue.length>=6) toque.queue.shift();
+  toque.queue.push(row);
+
+  toqueRun();
+}
+
+async function toqueRun(){
+  if(toque.running) return;
+
+  toque.running=true;
+
+  try{
+    while(toque.queue.length){
+      const row=toque.queue.shift();
+
+      try{
+        if(row.tipo==="desenho") await toqueShowDrawing(row);
+        else await toqueShowStage(row);
+      }catch(error){
+        console.warn("Toque: erro ao exibir",error);
+      }
+    }
+  }finally{
+    toque.running=false;
+  }
+}
+
+function toqueStageOpen(st){
+  st.classList.add("toque-open");
+
+  try{
+    if(st.showPopover && !st.matches(":popover-open")) st.showPopover();
+  }catch{}
+}
+
+function toqueStageClose(st){
+  try{
+    if(st.hidePopover && st.matches(":popover-open")) st.hidePopover();
+  }catch{}
+
+  st.classList.remove("toque-open","in","out");
+}
+
+function toqueShowStage(row){
+  return new Promise(resolve=>{
+    const st=$("#toqueStage");
+
+    if(!st){ resolve(); return; }
+
+    const t=TOQUE_TIPOS[row.tipo];
+
+    $("#toqueStageEmoji").textContent=t.emoji;
+    $("#toqueStageText").textContent=t.msg(toqueRowName(row));
+
+    st.classList.remove("in","out");
+    void st.offsetWidth;
+
+    toqueStageOpen(st);
+    st.classList.add("in");
+
+    toqueBurst($("#toqueStageFx"),t.emoji,16,"-70vh");
+
+    try{ navigator.vibrate && navigator.vibrate([70,40,70]); }catch{}
+
+    clearTimeout(toque.stageTimer);
+
+    toque.stageTimer=setTimeout(()=>{
+      st.classList.remove("in");
+      st.classList.add("out");
+
+      setTimeout(()=>{
+        toqueStageClose(st);
+        resolve();
+      },450);
+    },TOQUE_STAGE_MS);
+  });
+}
+
+function toqueFormatWhen(iso){
+  const d=new Date(iso);
+
+  if(isNaN(d)) return "";
+
+  return d.toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+}
+
+async function toqueSignDrawing(path){
+  const p=storagePath(path);
+
+  for(let i=0;i<2;i++){
+    try{
+      return await signPrivatePath(p);
+    }catch(error){
+      if(i===0) await new Promise(r=>setTimeout(r,700));
+      else console.warn("Toque: não foi possível abrir o desenho",p,error?.message||error);
+    }
+  }
+
+  return "";
+}
+
+function toqueLoadImage(url){
+  return new Promise(resolve=>{
+    const img=new Image();
+    const t=setTimeout(()=>resolve(false),10000);
+
+    img.onload=()=>{ clearTimeout(t); resolve(true); };
+    img.onerror=()=>{ clearTimeout(t); resolve(false); };
+    img.src=url;
+  });
+}
+
+async function toqueSetLast(row,knownUrl=""){
+  toque.lastRow=row;
+
+  const box=$("#toqueLast");
+
+  if(!box) return;
+
+  box.hidden=false;
+
+  $("#toqueLastCap").textContent=
+    `Último desenho recebido · ${toqueRowName(row)} · ${toqueFormatWhen(row.created_at)}`;
+
+  const img=$("#toqueLastImg");
+  img.removeAttribute("src");
+
+  const url=knownUrl||await toqueSignDrawing(row.desenho_path);
+
+  if(toque.lastRow===row && url) img.src=url;
+}
+
+function toqueOpenViewer(row,url){
+  return new Promise(resolve=>{
+    const dlg=$("#toqueViewDialog");
+
+    if(!dlg){ resolve(); return; }
+
+    $("#toqueViewTitle").textContent=TOQUE_TIPOS.desenho.msg(toqueRowName(row));
+    $("#toqueViewWhen").textContent=toqueFormatWhen(row.created_at);
+    $("#toqueViewImg").src=url;
+
+    const done=()=>{
+      dlg.removeEventListener("close",done);
+      resolve();
+    };
+
+    dlg.addEventListener("close",done);
+
+    if(!dlg.open) dlg.showModal();
+
+    toqueBurst($("#toqueViewFx"),"❤️",12,"-60dvh");
+
+    try{ navigator.vibrate && navigator.vibrate([70,40,70]); }catch{}
+  });
+}
+
+async function toqueShowDrawing(row){
+  const url=await toqueSignDrawing(row.desenho_path);
+
+  toqueSetLast(row,url);
+
+  if(!url || !(await toqueLoadImage(url))){
+    showToast("O desenho chegou, mas não carregou. Toque em “Último desenho recebido”.",4500);
+    return;
+  }
+
+  await toqueOpenViewer(row,url);
+}
+
+async function toqueOpenLast(){
+  const row=toque.lastRow;
+
+  if(!row) return;
+
+  const url=await toqueSignDrawing(row.desenho_path);
+
+  if(!url){
+    showToast("Não foi possível abrir o desenho agora.",3000);
+    return;
+  }
+
+  toqueOpenViewer(row,url);
+}
+
+// ---------- buscar eventos (início e reconexão) ----------
+async function toqueFetchRecent(limit){
+  const {data:rows,error}=await supabaseClient
+    .from("toques")
+    .select("id,remetente,destinatario,remetente_nome,tipo,desenho_path,created_at")
+    .eq("destinatario",toque.me)
+    .order("created_at",{ascending:false})
+    .limit(limit);
+
+  if(error) throw error;
+
+  return rows||[];
+}
+
+// ao abrir o site: eventos antigos são só marcados como vistos (sem animação)
+async function toqueBaseline(){
+  const rows=await toqueFetchRecent(20);
+
+  rows.forEach(r=>toque.seen.add(r.id));
+
+  const lastDraw=rows.find(r=>
+    r.tipo==="desenho" && r.remetente===toque.other && toqueValidDrawingPath(r.desenho_path)
+  );
+
+  if(lastDraw) toqueSetLast(lastDraw);
+}
+
+// ao voltar para a aba / reconectar: mostra o que chegou enquanto estava fora
+async function toqueCatchUp(){
+  if(!toque.me) return;
+
+  try{
+    const rows=await toqueFetchRecent(10);
+
+    rows.reverse().forEach(r=>onToqueRow(r));
+  }catch(error){
+    console.warn("Toque: não foi possível buscar eventos perdidos",error?.message||error);
+  }
+}
+
+function toqueSubscribe(){
+  if(toque.channel){
+    try{ supabaseClient.removeChannel(toque.channel); }catch{}
+    toque.channel=null;
+  }
+
+  setToqueStatus("connecting","Conectando…");
+
+  toque.channel=supabaseClient
+    .channel(`toque-${toque.me}`)
+    .on(
+      "postgres_changes",
+      {event:"INSERT",schema:"public",table:"toques",filter:`destinatario=eq.${toque.me}`},
+      payload=>onToqueRow(payload.new)
+    )
+    .subscribe((status,err)=>{
+      if(status==="SUBSCRIBED"){
+        setToqueStatus("on","Conectado · recebendo em tempo real");
+
+        if(toque.subscribedOnce) toqueCatchUp();
+
+        toque.subscribedOnce=true;
+      }else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"){
+        console.warn("Toque: realtime",status,err?.message||err);
+        setToqueStatus("off","Sem conexão em tempo real");
+      }else if(status==="CLOSED"){
+        setToqueStatus("off","Desconectado");
+      }
+    });
+}
+
+async function initToque(){
+  if(toque.started || !$("#toque")) return;
+
+  toque.started=true;
+
+  try{
+    const {data:sess,error}=await supabaseClient.auth.getSession();
+    const user=sess?.session?.user;
+
+    if(error||!user||!AUTHORIZED_USER_IDS.has(user.id)){
+      throw new Error("sem sessão autorizada");
+    }
+
+    const others=[...AUTHORIZED_USER_IDS].filter(id=>id!==user.id);
+
+    if(others.length!==1) throw new Error("usuários autorizados mal configurados");
+
+    toque.me=user.id;
+    toque.other=others[0];
+
+    renderToqueIdentity();
+
+    try{ await supabaseClient.realtime.setAuth(sess.session.access_token); }catch{}
+
+    try{ await toqueBaseline(); }
+    catch(error){ console.warn("Toque: não foi possível ler eventos",error?.message||error); }
+
+    toqueSubscribe();
+
+  }catch(error){
+    console.warn("Toque indisponível:",error?.message||error);
+
+    toque.started=false;
+    setToqueStatus("off","Toque indisponível");
+  }
+}
+
+// ---------- tela de desenho ----------
+function toqueSizeCanvas(){
+  const cv=$("#toqueCanvas"),wrap=$("#toqueCanvasWrap");
+
+  if(!cv||!wrap) return;
+
+  const r=wrap.getBoundingClientRect();
+  const w=Math.floor(r.width),h=Math.floor(r.height);
+
+  if(w<2||h<2) return;
+  if(toqueDraw.ctx && w===toqueDraw.w && h===toqueDraw.h) return;
+
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+
+  let snap=null;
+
+  if(toqueDraw.ctx && toqueDraw.ink){
+    snap=document.createElement("canvas");
+    snap.width=cv.width;
+    snap.height=cv.height;
+    snap.getContext("2d").drawImage(cv,0,0);
+  }
+
+  const oldW=toqueDraw.w,oldH=toqueDraw.h;
+
+  cv.width=Math.round(w*dpr);
+  cv.height=Math.round(h*dpr);
+
+  const ctx=cv.getContext("2d");
+
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.fillStyle="#fff";
+  ctx.fillRect(0,0,w,h);
+
+  if(snap && oldW && oldH){
+    // mantém o desenho (sem distorcer) se a tela girar/redimensionar
+    const k=Math.min(w/oldW,h/oldH);
+
+    ctx.drawImage(snap,0,0,snap.width,snap.height,(w-oldW*k)/2,(h-oldH*k)/2,oldW*k,oldH*k);
+  }
+
+  toqueDraw.ctx=ctx;
+  toqueDraw.w=w;
+  toqueDraw.h=h;
+}
+
+function toqueClearCanvas(){
+  if(toqueDraw.ctx){
+    toqueDraw.ctx.save();
+    toqueDraw.ctx.setTransform(1,0,0,1,0,0);
+    toqueDraw.ctx.fillStyle="#fff";
+    toqueDraw.ctx.fillRect(0,0,$("#toqueCanvas").width,$("#toqueCanvas").height);
+    toqueDraw.ctx.restore();
+  }
+
+  toqueDraw.ink=false;
+}
+
+function openToqueDraw(){
+  if(!toque.me){
+    showToast("O Toque ainda não está pronto.");
+    return;
+  }
+
+  if(!toqueIdentity()){
+    showToast("Escolha quem você é primeiro.");
+    return;
+  }
+
+  const dlg=$("#toqueDrawDialog");
+
+  if(!dlg||dlg.open) return;
+
+  document.documentElement.classList.add("toque-lock");
+  dlg.showModal();
+
+  requestAnimationFrame(toqueSizeCanvas);
+
+  if(!toqueDraw.ro && "ResizeObserver" in window){
+    toqueDraw.ro=new ResizeObserver(()=>toqueSizeCanvas());
+    toqueDraw.ro.observe($("#toqueCanvasWrap"));
+  }
+}
+
+function toqueExportBlob(){
+  const cv=$("#toqueCanvas");
+  const MAX=1000;
+
+  let out=cv;
+
+  if(cv.width>MAX){
+    const k=MAX/cv.width;
+    const t=document.createElement("canvas");
+
+    t.width=MAX;
+    t.height=Math.round(cv.height*k);
+
+    const c=t.getContext("2d");
+
+    c.fillStyle="#fff";
+    c.fillRect(0,0,t.width,t.height);
+    c.drawImage(cv,0,0,t.width,t.height);
+
+    out=t;
+  }
+
+  return new Promise((resolve,reject)=>{
+    out.toBlob(b=>b?resolve(b):reject(new Error("Não foi possível gerar a imagem")),"image/png");
+  });
+}
+
+async function sendToqueDrawing(){
+  if(toqueDraw.sending) return;
+
+  if(!toqueDraw.ink){
+    showToast("Desenhe algo primeiro ✏️");
+    return;
+  }
+
+  const btn=$("#toqueDrawSend");
+
+  toqueDraw.sending=true;
+  btn.disabled=true;
+  btn.textContent="Enviando…";
+
+  let path="";
+
+  try{
+    const blob=await toqueExportBlob();
+
+    const id=(crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+
+    path=`toque/${id}.png`;
+
+    const {error:upError}=await supabaseClient.storage
+      .from(PRIVATE_BUCKET)
+      .upload(path,blob,{contentType:"image/png",upsert:false});
+
+    if(upError) throw upError;
+
+    const ok=await sendToque("desenho",{desenhoPath:`storage:${PRIVATE_BUCKET}/${path}`});
+
+    if(!ok){
+      // evento não foi criado: remove o arquivo para não sobrar lixo
+      try{ await supabaseClient.storage.from(PRIVATE_BUCKET).remove([path]); }catch{}
+      return;
+    }
+
+    $("#toqueDrawDialog").close();
+    toqueClearCanvas();
+
+  }catch(error){
+    console.error("Toque: falha ao enviar desenho",error);
+    showToast("Não foi possível enviar o desenho. Tente de novo.",3800);
+  }finally{
+    toqueDraw.sending=false;
+    btn.disabled=false;
+    btn.textContent="Enviar ❤️";
+  }
+}
+
+(function bindToque(){
+  const section=$("#toque");
+
+  section?.addEventListener("click",e=>{
+    const who=e.target.closest("[data-toque-who]");
+
+    if(who){
+      setToqueIdentity(who.dataset.toqueWho);
+      return;
+    }
+
+    if(e.target.closest("#toqueLast")){
+      toqueOpenLast();
+      return;
+    }
+
+    const btn=e.target.closest("[data-toque]");
+
+    if(!btn||btn.disabled) return;
+
+    if(btn.dataset.toque==="desenho") openToqueDraw();
+    else sendToque(btn.dataset.toque,{btn});
+  });
+
+  const view=$("#toqueViewDialog");
+
+  view?.addEventListener("click",e=>{
+    if(e.target.closest("[data-toque-view-close]")) view.close();
+
+    if(e.target.closest("[data-toque-reply]")){
+      view.close();
+      openToqueDraw();
+    }
+  });
+
+  const dlg=$("#toqueDrawDialog");
+  const cv=$("#toqueCanvas");
+  const wrap=$("#toqueCanvasWrap");
+
+  if(!dlg||!cv||!wrap) return;
+
+  dlg.addEventListener("close",()=>{
+    document.documentElement.classList.remove("toque-lock");
+    toqueDraw.pid=null;
+  });
+
+  $("#toqueDrawClose").addEventListener("click",()=>dlg.close());
+  $("#toqueDrawClear").addEventListener("click",toqueClearCanvas);
+  $("#toqueDrawSend").addEventListener("click",sendToqueDrawing);
+
+  dlg.querySelector(".toque-colors").addEventListener("click",e=>{
+    const b=e.target.closest("[data-color]");
+
+    if(!b) return;
+
+    toqueDraw.color=b.dataset.color;
+
+    dlg.querySelectorAll(".toque-color").forEach(x=>x.classList.toggle("is-on",x===b));
+  });
+
+  // desenho com dedo (celular) ou mouse (computador)
+  const pos=ev=>{
+    const r=cv.getBoundingClientRect();
+
+    return {x:ev.clientX-r.left,y:ev.clientY-r.top};
+  };
+
+  const segment=p=>{
+    const c=toqueDraw.ctx;
+
+    if(!c) return;
+
+    const m={x:(toqueDraw.last.x+p.x)/2,y:(toqueDraw.last.y+p.y)/2};
+
+    c.strokeStyle=toqueDraw.color;
+    c.lineWidth=toqueDraw.size;
+    c.lineCap="round";
+    c.lineJoin="round";
+    c.beginPath();
+    c.moveTo(toqueDraw.mid.x,toqueDraw.mid.y);
+    c.quadraticCurveTo(toqueDraw.last.x,toqueDraw.last.y,m.x,m.y);
+    c.stroke();
+
+    toqueDraw.last=p;
+    toqueDraw.mid=m;
+    toqueDraw.ink=true;
+  };
+
+  cv.addEventListener("pointerdown",e=>{
+    if(toqueDraw.pid!==null||!toqueDraw.ctx) return;
+    if(e.pointerType==="mouse" && e.button!==0) return;
+
+    e.preventDefault();
+
+    toqueDraw.pid=e.pointerId;
+
+    try{ cv.setPointerCapture(e.pointerId); }catch{}
+
+    const p=pos(e);
+
+    toqueDraw.last=p;
+    toqueDraw.mid=p;
+
+    const c=toqueDraw.ctx;
+
+    c.fillStyle=toqueDraw.color;
+    c.beginPath();
+    c.arc(p.x,p.y,toqueDraw.size/2,0,Math.PI*2);
+    c.fill();
+
+    toqueDraw.ink=true;
+  });
+
+  cv.addEventListener("pointermove",e=>{
+    if(e.pointerId!==toqueDraw.pid) return;
+
+    e.preventDefault();
+
+    const list=e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+
+    (list.length ? list : [e]).forEach(ev=>segment(pos(ev)));
+  });
+
+  const end=e=>{
+    if(e.pointerId!==toqueDraw.pid) return;
+
+    toqueDraw.pid=null;
+
+    try{ cv.releasePointerCapture(e.pointerId); }catch{}
+  };
+
+  cv.addEventListener("pointerup",end);
+  cv.addEventListener("pointercancel",end);
+  cv.addEventListener("contextmenu",e=>e.preventDefault());
+
+  // reforço p/ navegadores antigos: o dedo desenhando nunca rola a página
+  ["touchstart","touchmove"].forEach(t=>{
+    wrap.addEventListener(t,e=>e.preventDefault(),{passive:false});
+  });
+})();
+
+// volta para a aba / internet voltou -> busca o que chegou enquanto estava fora
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible" && toque.started) toqueCatchUp();
+});
+
+window.addEventListener("online",()=>{
+  if(toque.started) toqueCatchUp();
 });
 
 async function bootstrap(){
