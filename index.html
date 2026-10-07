@@ -36,6 +36,7 @@
       <a href="#cartas">Cartas</a>
       <a href="#coisas">Nossas coisas</a>
       <a href="#sonhos">Sonhos</a>
+      <a href="#toque">Toque</a>
     </nav>
     <button id="navToggle" class="icon-btn nav-toggle" type="button" aria-label="Abrir menu" aria-expanded="false" aria-controls="mainNav">☰</button>
     <div class="top-actions">
@@ -50,6 +51,7 @@
     <a href="#galeria" class="tab-bar-link"><span class="tab-icon" aria-hidden="true">🖼️</span><span>Galeria</span></a>
     <a href="#cartas" class="tab-bar-link"><span class="tab-icon" aria-hidden="true">💌</span><span>Cartas</span></a>
     <a href="#sonhos" class="tab-bar-link"><span class="tab-icon" aria-hidden="true">✨</span><span>Sonhos</span></a>
+    <a href="#toque" class="tab-bar-link"><span class="tab-icon" aria-hidden="true">💞</span><span>Toque</span></a>
   </nav>
 
   <div id="editBar" class="edit-bar" hidden>
@@ -161,6 +163,37 @@
       <div class="edit-only add-area"><button class="secondary" onclick="openDreamForm()">＋ Adicionar sonho</button></div>
     </section>
 
+    <section id="toque" class="section soft toque-section">
+      <div class="section-heading">
+        <p class="eyebrow">❤️ TOQUE</p>
+        <h2>Mande um toque agora</h2>
+        <p>Escolha uma ação e ela aparece na hora na tela do outro, em tempo real.</p>
+      </div>
+
+      <div class="toque-card">
+        <div id="toqueStatus" class="toque-status" data-state="connecting" role="status">
+          <span class="dot" aria-hidden="true"></span><span id="toqueStatusText">Conectando…</span>
+        </div>
+
+        <div id="toqueWho" class="toque-who" hidden></div>
+
+        <div id="toqueGrid" class="toque-grid">
+          <button type="button" class="toque-btn" data-toque="carinho" disabled><span class="toque-ico" aria-hidden="true">❤️</span><span>Carinho</span></button>
+          <button type="button" class="toque-btn" data-toque="abraco" disabled><span class="toque-ico" aria-hidden="true">🫂</span><span>Abraço</span></button>
+          <button type="button" class="toque-btn" data-toque="beijo" disabled><span class="toque-ico" aria-hidden="true">💋</span><span>Beijo</span></button>
+          <button type="button" class="toque-btn" data-toque="saudade" disabled><span class="toque-ico" aria-hidden="true">🥰</span><span>Saudade</span></button>
+          <button type="button" class="toque-btn toque-btn-draw" data-toque="desenho" disabled><span class="toque-ico" aria-hidden="true">✏️</span><span>Desenhar</span></button>
+        </div>
+
+        <button type="button" id="toqueLast" class="toque-last" hidden>
+          <img id="toqueLastImg" alt="Último desenho recebido">
+          <span id="toqueLastCap"></span>
+        </button>
+
+        <div id="toqueFx" class="toque-fx" aria-hidden="true"></div>
+      </div>
+    </section>
+
     <section id="musica" class="section music-section">
       <div class="music-card">
         <div class="music-icon">♫</div>
@@ -209,6 +242,51 @@
     <button class="close-dialog" onclick="imageDialog.close()" aria-label="Fechar">×</button>
     <img id="modalImage" alt="">
     <p id="modalCaption"></p>
+  </dialog>
+
+  <div id="toqueStage" class="toque-stage" popover="manual" role="status" aria-live="assertive">
+    <div class="toque-stage-card">
+      <div id="toqueStageEmoji" class="toque-stage-emoji" aria-hidden="true">❤️</div>
+      <p id="toqueStageText" class="toque-stage-text"></p>
+    </div>
+    <div id="toqueStageFx" class="toque-fx" aria-hidden="true"></div>
+  </div>
+
+  <dialog id="toqueDrawDialog" class="toque-dialog" aria-labelledby="toqueDrawTitle">
+    <div class="toque-draw">
+      <div class="toque-draw-head">
+        <h3 id="toqueDrawTitle">Desenhe algo para enviar ❤️</h3>
+        <button type="button" id="toqueDrawClose" class="toque-x" aria-label="Fechar">×</button>
+      </div>
+      <div id="toqueCanvasWrap" class="toque-canvas-wrap">
+        <canvas id="toqueCanvas" aria-label="Área de desenho"></canvas>
+      </div>
+      <div class="toque-colors" role="group" aria-label="Cor do traço">
+        <button type="button" class="toque-color is-on" data-color="#241a1f" style="--c:#241a1f" aria-label="Preto"></button>
+        <button type="button" class="toque-color" data-color="#e2305f" style="--c:#e2305f" aria-label="Vermelho"></button>
+        <button type="button" class="toque-color" data-color="#f08ab0" style="--c:#f08ab0" aria-label="Rosa"></button>
+        <button type="button" class="toque-color" data-color="#3b82f6" style="--c:#3b82f6" aria-label="Azul"></button>
+        <button type="button" class="toque-color" data-color="#f2b705" style="--c:#f2b705" aria-label="Amarelo"></button>
+      </div>
+      <div class="toque-draw-actions">
+        <button type="button" id="toqueDrawClear" class="secondary toque-big">Apagar</button>
+        <button type="button" id="toqueDrawSend" class="primary toque-big">Enviar ❤️</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="toqueViewDialog" class="toque-dialog" aria-labelledby="toqueViewTitle">
+    <div class="toque-view">
+      <div id="toqueViewFx" class="toque-fx" aria-hidden="true"></div>
+      <p class="eyebrow">💌 CHEGOU PARA VOCÊ</p>
+      <h3 id="toqueViewTitle"></h3>
+      <p id="toqueViewWhen" class="toque-view-when"></p>
+      <img id="toqueViewImg" class="toque-view-img" alt="Desenho recebido">
+      <div class="toque-draw-actions">
+        <button type="button" class="secondary toque-big" data-toque-view-close>Fechar</button>
+        <button type="button" class="primary toque-big" data-toque-reply>Desenhar de volta ✏️</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="./storage.js"></script>
